@@ -1,15 +1,22 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
 func main() {
-	fmt.Println("Running!")
+
+	// Parse directory flag
+	var dirFlag = flag.String("directory", ".", "directory to serve files from")
+	flag.Parse()
+
+	fmt.Printf("Running, with directory: %s \n", *dirFlag)
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
 		fmt.Println("Failed to bind to port 4221")
@@ -23,11 +30,11 @@ func main() {
 			fmt.Println("Error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
-		go handleConnection(conn)
+		go handleConnection(conn, *dirFlag)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, dirFlag string) {
 
 	// Keep the connection open until the application closes
 	defer conn.Close()
@@ -47,7 +54,7 @@ func handleConnection(conn net.Conn) {
 	// Map based on methods
 	switch method {
 	case "GET":
-		response = handleGet(path, conn, headers)
+		response = handleGet(path, conn, headers, dirFlag)
 	default:
 		fmt.Println("Method not supported: ", method)
 	}
@@ -63,7 +70,7 @@ func handleConnection(conn net.Conn) {
 	conn.Close()
 }
 
-func handleGet(path string, conn net.Conn, headers map[string]string) (response string) {
+func handleGet(path string, conn net.Conn, requestHeaders map[string]string, dirFlag string) (response string) {
 
 	var header string
 	var body string
@@ -72,18 +79,45 @@ func handleGet(path string, conn net.Conn, headers map[string]string) (response 
 	var echoPattern = regexp.MustCompile(`^/echo/([a-zA-Z0-9/-]+)$`)
 	var basePattern = regexp.MustCompile(`^/$`)
 	var userAgentPattern = regexp.MustCompile(`^/user-agent$`)
+	var filePattern = regexp.MustCompile(`^/files/([a-zA-Z0-9_-]+)$`)
 
 	switch {
 	case basePattern.MatchString(path):
 		statusResponse = "HTTP/1.1 200 OK"
 	case userAgentPattern.MatchString(path):
-		body = headers["User-Agent"]
+		body = requestHeaders["User-Agent"]
 		statusResponse = "HTTP/1.1 200 OK"
 		header = "Content-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(body))
 	case echoPattern.MatchString(path):
 		body = echoPattern.FindStringSubmatch(path)[1]
 		statusResponse = "HTTP/1.1 200 OK"
 		header = "Content-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(body))
+	case filePattern.MatchString(path):
+		fileName := filePattern.FindStringSubmatch(path)[1]
+		filePath := filepath.Join(dirFlag, fileName)
+		file, err := os.Open(filePath)
+		if err != nil {
+			fmt.Println("Error opening file: ", err.Error())
+			statusResponse = "HTTP/1.1 404 Not Found"
+		} else {
+			fileInfo, err := file.Stat()
+			if err != nil {
+				fmt.Println("Error getting file info: ", err.Error())
+				statusResponse = "HTTP/1.1 500 Internal Server Error"
+			} else {
+				fileSize := fileInfo.Size()
+				fileBytes := make([]byte, fileSize)
+				_, err = file.Read(fileBytes)
+				if err != nil {
+					fmt.Println("Error reading file: ", err.Error())
+					statusResponse = "HTTP/1.1 500 Internal Server Error"
+				} else {
+					body = string(fileBytes)
+					statusResponse = "HTTP/1.1 200 OK"
+					header = "Content-Type: application/octet-stream\r\nContent-Length: " + fmt.Sprintf("%d", fileSize)
+				}
+			}
+		}
 	default:
 		fmt.Println("Path not found: ", path)
 		statusResponse = "HTTP/1.1 404 Not Found"
