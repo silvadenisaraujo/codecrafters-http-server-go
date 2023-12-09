@@ -32,7 +32,7 @@ func main() {
 	}
 
 	// Extract path from request
-	method, path := extractMethodPath(request)
+	method, path, headers := parseRequest(request)
 
 	// Define response
 	response := ""
@@ -40,7 +40,7 @@ func main() {
 	// Swtich case fo methods
 	switch method {
 	case "GET":
-		response = handleGet(path, conn)
+		response = handleGet(path, conn, headers)
 	default:
 		fmt.Println("Method not supported: ", method)
 	}
@@ -56,7 +56,7 @@ func main() {
 	conn.Close()
 }
 
-func handleGet(path string, conn net.Conn) (response string) {
+func handleGet(path string, conn net.Conn, headers map[string]string) (response string) {
 
 	var header string
 	var body string
@@ -64,13 +64,15 @@ func handleGet(path string, conn net.Conn) (response string) {
 
 	var echoPattern = regexp.MustCompile(`^/echo/([a-zA-Z0-9/-]+)$`)
 	var basePattern = regexp.MustCompile(`^/$`)
-
-	fmt.Println("Path: ", path)
-	fmt.Println("Path: ", path)
+	var userAgentPattern = regexp.MustCompile(`^/user-agent$`)
 
 	switch {
 	case basePattern.MatchString(path):
 		statusResponse = "HTTP/1.1 200 OK"
+	case userAgentPattern.MatchString(path):
+		body = headers["User-Agent"]
+		statusResponse = "HTTP/1.1 200 OK"
+		header = "Content-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(body))
 	case echoPattern.MatchString(path):
 		body = echoPattern.FindStringSubmatch(path)[1]
 		statusResponse = "HTTP/1.1 200 OK"
@@ -91,7 +93,7 @@ func readRequest(conn net.Conn) (request []byte, n int, err error) {
 	return request, n, err
 }
 
-func extractMethodPath(request []byte) (method string, path string) {
+func parseRequest(request []byte) (method string, path string, headers map[string]string) {
 	/**
 	Example of a HTTP request header:
 	GET /index.html HTTP/1.1
@@ -103,5 +105,16 @@ func extractMethodPath(request []byte) (method string, path string) {
 	lines := strings.Split(string(request), "\r\n")
 	firstLine := lines[0]
 	components := strings.Split(firstLine, " ")
-	return components[0], components[1]
+
+	// Return headers as a map
+	headers = make(map[string]string)
+	for _, line := range lines[1:] {
+		if line == "" {
+			break
+		}
+		header := strings.Split(line, ":")
+		headers[header[0]] = strings.Trim(header[1], " ")
+	}
+
+	return components[0], components[1], headers
 }
