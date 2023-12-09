@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -31,16 +32,21 @@ func main() {
 	}
 
 	// Extract path from request
-	_, path := extractMethodPath(request)
+	method, path := extractMethodPath(request)
 
+	// Define response
 	response := ""
-	if path == "/" {
-		response = "HTTP/1.1 200 OK\r\n\r\n"
-	} else {
-		response = "HTTP/1.1 404 Not Found\r\n\r\n"
+
+	// Swtich case fo methods
+	switch method {
+	case "GET":
+		response = handleGet(path, conn)
+	default:
+		fmt.Println("Method not supported: ", method)
 	}
 
 	// Send the response
+	fmt.Println("Sending response: ", response)
 	_, err = conn.Write([]byte(response))
 	if err != nil {
 		fmt.Println("Error sending response: ", err.Error())
@@ -48,6 +54,35 @@ func main() {
 
 	// Close the connection
 	conn.Close()
+}
+
+func handleGet(path string, conn net.Conn) (response string) {
+
+	var header string
+	var body string
+	var statusResponse string
+
+	var echoPattern = regexp.MustCompile(`^/echo/([a-zA-Z0-9/-]+)$`)
+	var basePattern = regexp.MustCompile(`^/$`)
+
+	fmt.Println("Path: ", path)
+	fmt.Println("Path: ", path)
+
+	switch {
+	case basePattern.MatchString(path):
+		statusResponse = "HTTP/1.1 200 OK"
+	case echoPattern.MatchString(path):
+		body = echoPattern.FindStringSubmatch(path)[1]
+		statusResponse = "HTTP/1.1 200 OK"
+		header = "Content-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(body))
+	default:
+		fmt.Println("Path not found: ", path)
+		statusResponse = "HTTP/1.1 404 Not Found"
+	}
+
+	response = statusResponse + "\r\n" + header + "\r\n\r\n" + body
+
+	return response
 }
 
 func readRequest(conn net.Conn) (request []byte, n int, err error) {
