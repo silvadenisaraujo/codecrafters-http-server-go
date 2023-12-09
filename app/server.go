@@ -16,11 +16,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
+	// Handle multiple connections
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			os.Exit(1)
+		}
+		go handleConnection(conn)
 	}
+}
+
+func handleConnection(conn net.Conn) {
 
 	// Keep the connection open until the application closes
 	defer conn.Close()
@@ -37,7 +44,7 @@ func main() {
 	// Define response
 	response := ""
 
-	// Swtich case fo methods
+	// Map based on methods
 	switch method {
 	case "GET":
 		response = handleGet(path, conn, headers)
