@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"net"
@@ -46,7 +47,7 @@ func handleConnection(conn net.Conn, dirFlag string) {
 	}
 
 	// Extract path from request
-	method, path, headers := parseRequest(request)
+	method, path, headers, body := parseRequest(request)
 
 	// Define response
 	response := ""
@@ -55,6 +56,8 @@ func handleConnection(conn net.Conn, dirFlag string) {
 	switch method {
 	case "GET":
 		response = handleGet(path, conn, headers, dirFlag)
+	case "POST":
+		response = handlePost(path, body, conn, headers, dirFlag)
 	default:
 		fmt.Println("Method not supported: ", method)
 	}
@@ -68,6 +71,35 @@ func handleConnection(conn net.Conn, dirFlag string) {
 
 	// Close the connection
 	conn.Close()
+}
+
+func handlePost(path string, requestBody string, conn net.Conn, requestHeaders map[string]string, dirFlag string) (response string) {
+
+	var header string
+	var body string
+	var statusResponse string
+
+	var filePattern = regexp.MustCompile(`^/files/([a-zA-Z0-9_-]+)$`)
+
+	switch {
+	case filePattern.MatchString(path):
+		statusResponse = "HTTP/1.1 201 Created"
+		fileName := filePattern.FindStringSubmatch(path)[1]
+		filePath := filepath.Join(dirFlag, fileName)
+		err := os.WriteFile(filePath, []byte(requestBody), 0644)
+		if err != nil {
+			fmt.Println("Error writing file: ", err.Error())
+			statusResponse = "HTTP/1.1 500 Internal Server Error"
+		}
+	default:
+		fmt.Println("Path not found: ", path)
+		statusResponse = "HTTP/1.1 404 Not Found"
+	}
+
+	response = statusResponse + "\r\n" + header + "\r\n\r\n" + body
+
+	return response
+
 }
 
 func handleGet(path string, conn net.Conn, requestHeaders map[string]string, dirFlag string) (response string) {
@@ -134,7 +166,7 @@ func readRequest(conn net.Conn) (request []byte, n int, err error) {
 	return request, n, err
 }
 
-func parseRequest(request []byte) (method string, path string, headers map[string]string) {
+func parseRequest(request []byte) (method string, path string, headers map[string]string, body string) {
 	/**
 	Example of a HTTP request header:
 	GET /index.html HTTP/1.1
@@ -143,7 +175,9 @@ func parseRequest(request []byte) (method string, path string, headers map[strin
 	User-Agent: curl/7.64.1
 	**/
 
-	lines := strings.Split(string(request), "\r\n")
+	// Slice the buffer to remove the trailing null bytes
+	buffer_slice := request[:bytes.Index(request, []byte("\x00"))]
+	lines := strings.Split(string(buffer_slice), "\r\n")
 	firstLine := lines[0]
 	components := strings.Split(firstLine, " ")
 
@@ -157,5 +191,11 @@ func parseRequest(request []byte) (method string, path string, headers map[strin
 		headers[header[0]] = strings.Trim(header[1], " ")
 	}
 
-	return components[0], components[1], headers
+	// Read the body from the request if available
+	body = ""
+	if len(lines) > 1 {
+		body = lines[len(lines)-1]
+	}
+
+	return components[0], components[1], headers, body
 }
